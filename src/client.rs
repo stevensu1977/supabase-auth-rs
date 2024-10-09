@@ -1,34 +1,46 @@
-#![cfg(not(doctest))]
-
 use std::env;
 
 use reqwest::{
     header::{self, HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE},
-    Client, Response, StatusCode,
+    Client, Response,
 };
 
 use crate::{
-    error::{Error, SupabaseHTTPError},
+    error::Error,
     models::{
-        AuthClient, AuthServerHealth, AuthServerSettings, LogoutScope, Provider,
-        RefreshSessionPayload, RequestMagicLinkPayload, ResendParams, ResetPasswordForEmailPayload,
-        SSOResponse, Session, SignInEmailOtpParams, SignInWithEmailAndPasswordPayload,
-        SignInWithEmailOtpPayload, SignInWithIdTokenCredentials, SignInWithOAuthOptions,
-        SignInWithPhoneAndPasswordPayload, SignInWithSSO, SignUpWithEmailAndPasswordPayload,
-        SignUpWithPhoneAndPasswordPayload, UpdateUserPayload, User, VerifyOtpParams,
+        Provider, RefreshSessionPayload, RequestMagicLinkPayload, ResendParams,
+        ResetPasswordForEmailPayload, Session, SignInEmailOtpParams,
+        SignInWithEmailAndPasswordPayload, SignInWithEmailOtpPayload, SignInWithIdTokenCredentials,
+        SignInWithOAuthOptions, SignInWithPhoneAndPasswordPayload,
+        SignUpWithEmailAndPasswordPayload, SignUpWithPhoneAndPasswordPayload, UpdateUserPayload,
+        User, VerifyOtpParams,
     },
 };
 
+/// Supabase Auth Client
+/// You can find your project url and keys at https://supabase.com/dashboard/project/<your project id>/settings/api
+pub struct AuthClient {
+    pub client: Client,
+    /// REST endpoint for querying and managing your database
+    /// Example: https://<project id>.supabase.co
+    pub project_url: String,
+    /// WARN: The `service role` key has the ability to bypass Row Level Security. Never share it publicly.
+    pub api_key: String,
+    /// Used to decode your JWTs. You can also use this to mint your own JWTs.
+    pub jwt_secret: String,
+}
+
 impl AuthClient {
-    /// Create a new Auth Client
-    /// You can find your project url and keys at https://supabase.com/dashboard/project/<your project id>/settings/api
+    /// Create a new AuthClient
     pub fn new(
         project_url: impl Into<String>,
         api_key: impl Into<String>,
         jwt_secret: impl Into<String>,
     ) -> Self {
+        let client = Client::new();
+
         AuthClient {
-            client: Client::new(),
+            client,
             project_url: project_url.into(),
             api_key: api_key.into(),
             jwt_secret: jwt_secret.into(),
@@ -37,36 +49,22 @@ impl AuthClient {
 
     /// Create a new AuthClient from environment variables
     /// Requires `SUPABASE_URL`, `SUPABASE_API_KEY`, and `SUPABASE_JWT_SECRET` environment variables
-    /// # Example
-    /// ```
-    /// let auth_client = AuthClient::new_from_env().unwrap();
-    ///
-    /// assert!(auth_client.project_url == env::var("SUPABASE_URL").unwrap())
-    /// ```
     pub fn new_from_env() -> Result<AuthClient, Error> {
+        let client = Client::new();
+
         let project_url = env::var("SUPABASE_URL")?;
         let api_key = env::var("SUPABASE_API_KEY")?;
         let jwt_secret = env::var("SUPABASE_JWT_SECRET")?;
 
         Ok(AuthClient {
-            client: Client::new(),
-            project_url,
-            api_key,
-            jwt_secret,
+            client,
+            project_url: project_url.into(),
+            api_key: api_key.into(),
+            jwt_secret: jwt_secret.into(),
         })
     }
 
-    /// Sign in a user with an email and password
-    /// # Example
-    /// ```
-    /// let session = auth_client
-    ///     .login_with_email(demo_email, demo_password)
-    ///     .await
-    ///     .unwrap();
-    ///
-    /// assert!(session.user.email == demo_email)
-    /// ```
-    pub async fn login_with_email<S: Into<String>>(
+    pub async fn sign_in_with_email_and_password<S: Into<String>>(
         &self,
         email: S,
         password: S,
@@ -77,8 +75,8 @@ impl AuthClient {
         };
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
         let body = serde_json::to_string(&payload)?;
 
         let response = self
@@ -90,30 +88,13 @@ impl AuthClient {
             .headers(headers)
             .body(body)
             .send()
+            .await?
+            .text()
             .await?;
 
-        match response.status() {
-            StatusCode::OK => {
-                let session: Session = serde_json::from_str(&response.text().await?)?;
-                Ok(session)
-            }
-            _ => {
-                let error: SupabaseHTTPError = serde_json::from_str(&response.text().await?)?;
-                Err(Error::Supabase(error))
-            }
-        }
+        Ok(serde_json::from_str(&response)?)
     }
 
-    /// Sign in a user with phone number and password
-    /// # Example
-    /// ```
-    /// let session = auth_client
-    ///     .sign_in_with_phone_and_password(demo_phone, demo_password)
-    ///     .await
-    ///     .unwrap();
-    ///
-    /// assert!(session.user.phone == demo_phone)
-    /// ```
     pub async fn sign_in_with_phone_and_password<S: Into<String>>(
         &self,
         phone: S,
@@ -125,8 +106,8 @@ impl AuthClient {
         };
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&payload)?;
 
@@ -146,16 +127,6 @@ impl AuthClient {
         Ok(serde_json::from_str(&response)?)
     }
 
-    /// Sign up a new user with an email and password
-    /// # Example
-    /// ```
-    /// let session = auth_client
-    ///     .sign_up_with_email_and_password(demo_email, demo_password)
-    ///     .await
-    ///     .unwrap();
-    ///
-    /// assert!(session.user.email == demo_email)
-    ///```
     pub async fn sign_up_with_email_and_password<S: Into<String>>(
         &self,
         email: S,
@@ -167,8 +138,8 @@ impl AuthClient {
         };
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&payload)?;
 
@@ -185,16 +156,6 @@ impl AuthClient {
         Ok(serde_json::from_str::<Session>(&response)?)
     }
 
-    /// Sign up a new user with an email and password
-    /// # Example
-    /// ```
-    /// let session = auth_client
-    ///     .sign_up_with_phone_and_password(demo_phone, demo_password)
-    ///     .await
-    ///     .unwrap();
-    ///
-    /// assert!(session.user.phone == demo_phone)
-    ///```
     pub async fn sign_up_with_phone_and_password<S: Into<String>>(
         &self,
         phone: S,
@@ -206,8 +167,8 @@ impl AuthClient {
         };
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&payload)?;
 
@@ -224,14 +185,6 @@ impl AuthClient {
         Ok(serde_json::from_str::<Session>(&response)?)
     }
 
-    /// Sends a login email containing a magic link
-    /// # Example
-    /// ```
-    /// let _response = auth_client
-    ///     .send_login_email_with_magic_link(demo_email)
-    ///    .await
-    ///    .unwrap();
-    ///```
     pub async fn send_login_email_with_magic_link<S: Into<String>>(
         &self,
         email: S,
@@ -241,8 +194,8 @@ impl AuthClient {
         };
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&payload)?;
 
@@ -257,17 +210,13 @@ impl AuthClient {
         Ok(response)
     }
 
-    /// Send a Login OTP via SMS
-    /// # Example
-    /// ```
-    /// let response = auth_client.send_sms_with_otp(demo_phone).await;
-    /// ```
+    // Login with SMS OTP
     pub async fn send_sms_with_otp<S: Into<String>>(&self, phone: S) -> Result<Response, Error> {
         let payload = phone.into();
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&payload)?;
 
@@ -282,11 +231,7 @@ impl AuthClient {
         Ok(response)
     }
 
-    /// Send a Login OTP via email
-    /// # Example
-    /// ```
-    /// let send = auth_client.send_sms_with_otp(demo_phone).await.unwrap();
-    /// ```
+    // Login with Email OTP
     pub async fn send_email_with_otp<S: Into<String>>(
         &self,
         email: S,
@@ -298,8 +243,8 @@ impl AuthClient {
         };
 
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&payload)?;
 
@@ -315,32 +260,14 @@ impl AuthClient {
     }
 
     /// Sign in a user using an OAuth provider.
-    /// # Example
-    /// ```
-    /// // You can add custom parameters using a HashMap<String, String>
-    /// let mut params = HashMap::new();
-    /// params.insert("key".to_string(), "value".to_string());
-    ///
-    /// let options = SignInWithOAuthOptions {
-    ///     query_params: Some(params),
-    ///     redirect_to: Some("localhost".to_string()),
-    ///     scopes: Some("repo gist notifications".to_string()),
-    ///     skip_brower_redirect: Some(true),
-    /// };
-    ///
-    /// let response = auth_client
-    ///     .sign_in_with_oauth(supabase_auth::models::Provider::Github, Some(options))
-    ///     .await
-    ///     .unwrap();
-    /// ```
     pub async fn sign_in_with_oauth(
         &self,
         provider: Provider,
         options: Option<SignInWithOAuthOptions>,
     ) -> Result<Response, Error> {
         let mut headers = header::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("apikey", self.api_key.parse().unwrap());
 
         let body = serde_json::to_string(&options)?;
 
@@ -359,21 +286,16 @@ impl AuthClient {
         Ok(response)
     }
 
-    /// Return the signed in User
-    /// # Example
-    /// ```
-    /// let user = auth_client
-    ///     .get_user(session.unwrap().access_token)
-    ///     .await
-    ///     .unwrap();
-    ///
-    /// assert!(user.email == demo_email)
-    /// ```
+    /// Get the User struct of the logged in user
     pub async fn get_user<S: Into<String>>(&self, bearer_token: S) -> Result<User, Error> {
         let mut headers = header::HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
+        headers.insert("apikey", self.api_key.parse().unwrap());
         let token = format!("Bearer {}", &bearer_token.into());
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&token)?);
+        headers.insert(
+            AUTHORIZATION,
+            // TODO: Handle this
+            HeaderValue::from_str(&token).unwrap(),
+        );
 
         let user = self
             .client
@@ -384,31 +306,18 @@ impl AuthClient {
             .text()
             .await?;
 
-        Ok(serde_json::from_str(&user)?)
+        Ok(serde_json::from_str(&user).unwrap())
     }
 
-    /// Update the user, such as changing email or password. Each field (email, password, and data) is optional
-    /// # Example
-    /// ```
-    /// let updated_user_data = UpdateUserPayload {
-    ///     email: Some("demo@demo.com".to_string()),
-    ///     password: Some("demo_password".to_string()),
-    ///     data: None, // This field can hold any valid JSON value
-    /// };
-    ///
-    /// let user = auth_client
-    ///     .update_user(updated_user_data, access_token)
-    ///     .await
-    ///     .unwrap();
-    /// ```
+    /// Update the user with a new email or password. Each key (email, password, and data) is optional
     pub async fn update_user<S: Into<String>>(
         &self,
         updated_user: UpdateUserPayload,
         bearer_token: S,
     ) -> Result<User, Error> {
         let mut headers = header::HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse().unwrap());
+        headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {}", &bearer_token.into()))?,
@@ -424,20 +333,19 @@ impl AuthClient {
             .send()
             .await?
             .text()
-            .await?;
+            .await;
 
-        Ok(serde_json::from_str(&response)?)
+        Ok(serde_json::from_str::<User>(&response.unwrap())?)
     }
 
-    // TODO: Add test
     /// Allows signing in with an OIDC ID token. The authentication provider used should be enabled and configured.
     pub async fn sign_in_with_id_token(
         &self,
         credentials: SignInWithIdTokenCredentials,
     ) -> Result<Session, Error> {
         let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse().unwrap());
+        headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
 
         let body = serde_json::to_string(&credentials)?;
 
@@ -457,12 +365,11 @@ impl AuthClient {
         Ok(serde_json::from_str(&response)?)
     }
 
-    // TODO: Add test
     /// Sends an invite link to an email address.
     pub async fn invite_user_by_email<S: Into<String>>(&self, email: S) -> Result<User, Error> {
         let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse().unwrap());
+        headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
 
         let body = serde_json::to_string(&email.into())?;
 
@@ -479,16 +386,16 @@ impl AuthClient {
         Ok(serde_json::from_str(&response)?)
     }
 
-    // TODO: Add test
     pub async fn verify_otp(&self, params: VerifyOtpParams) -> Result<Session, Error> {
         let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse()?);
+        headers.insert(CONTENT_TYPE, "application/json".parse()?);
 
         let body = serde_json::to_string(&params)?;
 
-        let response = self
-            .client
+        let client = Client::new();
+
+        let response = client
             .post(&format!("{}/auth/v1/verify", self.project_url))
             .headers(headers)
             .body(body)
@@ -500,83 +407,21 @@ impl AuthClient {
         Ok(serde_json::from_str(&response)?)
     }
 
-    /// Check the Health Status of the Auth Server
-    /// # Example
-    /// ```
-    /// let health = auth_client
-    ///     .get_health()
-    ///     .await
-    ///     .unwrap();
-    /// ```
-    pub async fn get_health(&self) -> Result<AuthServerHealth, Error> {
-        let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-
-        let response = self
-            .client
-            .get(&format!("{}/auth/v1/health", self.project_url))
-            .headers(headers)
-            .send()
-            .await?
-            .text()
-            .await?;
-
-        Ok(serde_json::from_str(&response)?)
-    }
-
-    /// Retrieve the public settings of the server
-    /// # Example
-    /// ```
-    /// let settings = auth_client
-    ///     .get_settings()
-    ///     .await
-    ///     .unwrap();
-    /// ```
-    pub async fn get_settings(&self) -> Result<AuthServerSettings, Error> {
-        let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-
-        let response = self
-            .client
-            .get(&format!("{}/auth/v1/settings", self.project_url))
-            .headers(headers)
-            .send()
-            .await?
-            .text()
-            .await?;
-
-        Ok(serde_json::from_str(&response)?)
-    }
-
-    /// Exchange refresh token for a new session
-    /// # Example
-    /// ```
-    /// // When a user signs in they get a session
-    /// let original_session = auth_client
-    ///     .sign_in_with_email_and_password(demo_email.as_ref(), demo_password)
-    ///     .await
-    ///     .unwrap();
-    ///
-    /// // Exchange the refresh token from the original session to create a new session
-    /// let new_session = auth_client
-    ///     .refresh_session(original_session.refresh_token)
-    ///     .await
-    ///     .unwrap();
-    /// ```
     pub async fn exchange_token_for_session<S: Into<String>>(
         &self,
         refresh_token: S,
     ) -> Result<Session, Error> {
         let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse()?);
+        headers.insert(CONTENT_TYPE, "application/json".parse()?);
 
         let body = serde_json::to_string(&RefreshSessionPayload {
             refresh_token: refresh_token.into(),
         })?;
 
-        let response = self
-            .client
+        let client = Client::new();
+
+        let response = client
             .post(&format!(
                 "{}/auth/v1/token?grant_type=refresh_token",
                 self.project_url
@@ -597,24 +442,21 @@ impl AuthClient {
 
     /// Send a password recovery email. Invalid Email addresses will return Error Code 400.
     /// Valid email addresses that are not registered as users will not return an error.
-    /// # Example
-    /// ```
-    /// let response = auth_client.reset_password_for_email(demo_email).await.unwrap();
-    /// ```
     pub async fn reset_password_for_email<S: Into<String>>(
         &self,
         email: S,
     ) -> Result<Response, Error> {
         let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse()?);
+        headers.insert(CONTENT_TYPE, "application/json".parse()?);
 
         let body = serde_json::to_string(&ResetPasswordForEmailPayload {
             email: email.into(),
         })?;
 
-        let response = self
-            .client
+        let client = Client::new();
+
+        let response = client
             .post(&format!("{}/auth/v1/recover", self.project_url))
             .headers(headers)
             .body(body)
@@ -624,79 +466,23 @@ impl AuthClient {
         Ok(response)
     }
 
-    /// Resends emails for existing signup confirmation, email change, SMS OTP, or phone change OTP.
-    /// # Example
-    /// ```
-    /// // Resend can also take MobileResendParams
-    /// let credentials = DesktopResendParams {
-    ///     otp_type: supabase_auth::models::EmailOtpType::Email,
-    ///     email: demo_email.to_owned(),
-    ///     options: None,
-    /// };
-    ///
-    /// let resend = auth_client.resend(ResendParams::Desktop(credentials)).await;
-    /// ```
-    pub async fn resend(&self, credentials: ResendParams) -> Result<(), Error> {
+    /// Resends an existing signup confirmation email, email change email, SMS OTP or phone change OTP.
+    pub async fn resend(&self, credentials: ResendParams) -> Result<Response, Error> {
         let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
+        headers.insert("apikey", self.api_key.parse()?);
+        headers.insert(CONTENT_TYPE, "application/json".parse()?);
 
         let body = serde_json::to_string(&credentials)?;
 
-        let _response = self
-            .client
+        let client = Client::new();
+
+        let response = client
             .post(&format!("{}/auth/v1/resend", self.project_url))
             .headers(headers)
             .body(body)
             .send()
             .await?;
 
-        Ok(())
-    }
-
-    /// Logs out a user with a given scope
-    /// # Example
-    /// ```
-    /// auth_client.logout(Some(LogoutScope::Global), session.access_token).await.unwrap();
-    /// ```
-    pub async fn logout<S: Into<String>>(
-        &self,
-        scope: Option<LogoutScope>,
-        bearer_token: S,
-    ) -> Result<Response, Error> {
-        let mut headers = HeaderMap::new();
-        headers.insert("apikey", HeaderValue::from_str(&self.api_key)?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", &bearer_token.into()))?,
-        );
-
-        let body = serde_json::to_string(&scope)?;
-
-        let response = self
-            .client
-            .post(&format!("{}/auth/v1/logout", self.project_url))
-            .headers(headers)
-            .body(body)
-            .send()
-            .await?;
-
         Ok(response)
-    }
-
-    /// Get the project URL from an AuthClient
-    pub fn project_url(&self) -> &String {
-        &self.project_url
-    }
-
-    /// Get the API Key from an AuthClient
-    pub fn api_key(&self) -> &String {
-        &self.api_key
-    }
-
-    /// Get the JWT Secret from an AuthClient
-    pub fn jwt_secret(&self) -> &String {
-        &self.jwt_secret
     }
 }

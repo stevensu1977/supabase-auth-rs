@@ -1,19 +1,6 @@
 use core::fmt;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
-
-/// Supabase Auth Client
-pub struct AuthClient {
-    pub(crate) client: Client,
-    /// REST endpoint for querying and managing your database
-    /// Example: https://<project id>.supabase.co
-    pub(crate) project_url: String,
-    /// WARN: The `service role` key has the ability to bypass Row Level Security. Never share it publicly.
-    pub(crate) api_key: String,
-    /// Used to decode your JWTs. You can also use this to mint your own JWTs.
-    pub(crate) jwt_secret: String,
-}
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -65,6 +52,16 @@ pub struct UserMetadata {
     pub phone_verified: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -327,57 +324,6 @@ impl Display for Channel {
     }
 }
 
-/// Health status of the Auth Server
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuthServerHealth {
-    /// Version of the service
-    pub version: String,
-    /// Name of the service
-    pub name: String,
-    /// Description of the service
-    pub description: String,
-}
-
-/// Settings of the Auth Server
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AuthServerSettings {
-    pub external: External,
-    pub disable_signup: bool,
-    pub mailer_autoconfirm: bool,
-    pub phone_autoconfirm: bool,
-    pub sms_provider: String,
-    pub saml_enabled: bool,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct External {
-    pub anonymous_users: bool,
-    pub apple: bool,
-    pub azure: bool,
-    pub bitbucket: bool,
-    pub discord: bool,
-    pub facebook: bool,
-    pub figma: bool,
-    pub fly: bool,
-    pub github: bool,
-    pub gitlab: bool,
-    pub google: bool,
-    pub keycloak: bool,
-    pub kakao: bool,
-    pub linkedin: bool,
-    pub linkedin_oidc: bool,
-    pub notion: bool,
-    pub spotify: bool,
-    pub slack: bool,
-    pub slack_oidc: bool,
-    pub workos: bool,
-    pub twitch: bool,
-    pub twitter: bool,
-    pub email: bool,
-    pub phone: bool,
-    pub zoom: bool,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Provider {
     Apple,
@@ -430,25 +376,5 @@ impl Display for Provider {
             Provider::Workos => write!(f, "workos"),
             Provider::Zoom => write!(f, "zoom"),
         }
-    }
-}
-
-/// Represents the scope of the logout operation
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LogoutScope {
-    Global,
-    Local,
-    Others,
-}
-
-// Implement custom Debug to avoid exposing sensitive information
-impl fmt::Debug for AuthClient {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthClient")
-            .field("project_url", &self.project_url())
-            .field("api_key", &"[REDACTED]")
-            .field("jwt_secret", &"[REDACTED]")
-            .finish()
     }
 }
