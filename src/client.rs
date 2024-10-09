@@ -306,7 +306,9 @@ impl AuthClient {
             .text()
             .await?;
 
-        Ok(serde_json::from_str(&user).unwrap())
+        //Ok(serde_json::from_str(&user).unwrap())
+        let parsed_user: User = serde_json::from_str(&user)?;
+        Ok(parsed_user)
     }
 
     /// Update the user with a new email or password. Each key (email, password, and data) is optional
